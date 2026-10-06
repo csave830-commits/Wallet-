@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1020">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<title>Crypto Wallet</title>
+<style>
+:root{color-scheme:dark;font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;background:#0b1020;color:#f4f6fb;--m:#aab5c9;--b:#29344c;--l:#b8f36b}
+*{box-sizing:border-box}[hidden]{display:none!important}
+body{margin:0;min-height:100vh;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);background:radial-gradient(ellipse at 78% 8%,rgb(65 86 184/18%),transparent 35rem),#0b1020}
+.page{width:min(100% - 24px,560px);margin:0 auto;padding-bottom:40px}
+header{display:flex;align-items:center;justify-content:space-between;height:68px;border-bottom:1px solid #202941;font-weight:750}
+header span.t{padding:6px 10px;border:1px solid #384760;border-radius:99px;color:#c3d0e6;font-size:12px}
+h1{font-size:30px;margin:26px 0 8px;letter-spacing:-.04em}
+p{color:var(--m);line-height:1.6;font-size:14px;margin:0 0 14px}
+.card{padding:20px;border:1px solid var(--b);border-radius:18px;background:linear-gradient(145deg,#1a253d,#111829);margin-bottom:14px}
+label{display:block;font-size:12px;color:#97a5bd;margin:12px 0 5px}
+input,textarea,select{width:100%;padding:13px;border:1px solid #394661;border-radius:12px;background:#0e1527;color:#f4f6fb;font:inherit;font-size:15px}
+textarea{min-height:84px}
+button{width:100%;min-height:48px;margin-top:12px;border:1px solid #394661;border-radius:12px;background:#141c30;color:#f4f6fb;font:inherit;font-weight:680;cursor:pointer}
+button.p{background:var(--l);border-color:var(--l);color:#15210a}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.addr{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#c3d0e6;overflow-wrap:anywhere;margin:10px 0}
+.bal{font-size:32px;font-weight:730;letter-spacing:-.04em;margin:4px 0}
+#st{min-height:20px;font-size:13px;overflow-wrap:anywhere}#st.err{color:#ff9a9a}#st.ok{color:var(--l)}
+.warn{border-color:#665331;background:#251f19}.warn p{color:#c5bdad}
+.phrase{padding:14px;border-radius:12px;background:#0e1527;font-family:ui-monospace,monospace;font-size:15px;line-height:1.8;color:#f4cf84}
+</style>
+</head>
+<body>
+<div class="page">
+<header><span>◆ Crypto Wallet</span><span class="t">Self-custody</span></header>
+
+<section id="lock">
+ <div id="setupBox">
+  <h1>Set up your wallet</h1>
+  <p>Import an existing wallet with its seed phrase or private key, or leave it blank to create a new one. Everything stays encrypted on this device.</p>
+  <div class="card" id="setupForm">
+   <label>Seed phrase or private key (blank = create new)</label>
+   <textarea id="seed" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea>
+   <label>Choose a password (8+ characters)</label><input id="pw1" type="password" autocomplete="new-password">
+   <label>Repeat password</label><input id="pw2" type="password" autocomplete="new-password">
+   <button class="p" id="setupBtn">Continue</button>
+  </div>
+  <div class="card warn" id="phraseBox" hidden>
+   <p><b style="color:#f4cf84">Write these words on paper.</b> They are the only way to recover your wallet. Never share them.</p>
+   <div class="phrase" id="phrase"></div>
+   <button class="p" id="savedBtn">I wrote it down</button>
+  </div>
+ </div>
+ <div id="unlockBox" hidden>
+  <h1>Unlock wallet</h1>
+  <p>Only the password you chose on this device opens your wallet.</p>
+  <div class="card">
+   <label>Password</label><input id="pw" type="password" autocomplete="current-password">
+   <button class="p" id="unlockBtn">Unlock</button>
+   <button id="eraseBtn">Forgot password? Erase and re-import</button>
+  </div>
+ </div>
+</section>
+
+<section id="app" hidden>
+ <h1>Your wallet</h1>
+ <div class="card">
+  <label>Network</label>
+  <select id="net"></select>
+  <div class="addr" id="addr"></div>
+  <p style="margin:0;font-size:12px">Balance</p>
+  <div class="bal" id="bal">—</div>
+  <div class="row"><button id="copyBtn">Copy address</button><button id="refBtn">Refresh</button></div>
+ </div>
+ <div class="card">
+  <b>Send</b>
+  <label>To address</label><input id="to" autocomplete="off" spellcheck="false">
+  <label>Amount</label><input id="amt" inputmode="decimal" placeholder="0.0">
+  <button class="p" id="sendBtn">Send</button>
+ </div>
+ <div class="card">
+  <b>Buy / sell with your bank</b>
+  <p style="margin-top:6px">Handled by a licensed provider (identity check required).</p>
+  <div class="row"><button class="p" id="buyBtn">Buy</button><button id="sellBtn">Sell to bank</button></div>
+ </div>
+ <button id="lockBtn">Lock wallet</button>
+</section>
+
+<p id="st" role="status"></p>
+<div class="card warn"><p style="margin:0">Never share your seed phrase. Test with small amounts first. Transactions cannot be reversed.</p></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tronweb@5.3.2/dist/TronWeb.js"></script>
+<script>
+"use strict";
+// Add your Transak (or other provider) API key here to enable bank buy/sell.
+const ONRAMP_KEY="";
+const CH={
+ eth:{n:"Ethereum",s:"ETH",rpc:"https://eth.llamarpc.com"},
+ bnb:{n:"BNB Chain",s:"BNB",rpc:"https://bsc-dataseed.binance.org"},
+ pol:{n:"Polygon",s:"POL",rpc:"https://polygon-rpc.com"},
+ base:{n:"Base",s:"ETH",rpc:"https://mainnet.base.org"},
+ arb:{n:"Arbitrum",s:"ETH",rpc:"https://arb1.arbitrum.io/rpc"},
+ op:{n:"Optimism",s:"ETH",rpc:"https://mainnet.optimism.io"},
+ avax:{n:"Avalanche",s:"AVAX",rpc:"https://api.avax.network/ext/bc/C/rpc"},
+ tron:{n:"Tron",s:"TRX"},
+ custom:{n:"Custom EVM chain",s:"",rpc:""}
+};
+const $=id=>document.getElementById(id);
+const enc=new TextEncoder(),dec=new TextDecoder();
+const b64=b=>btoa(String.fromCharCode(...new Uint8Array(b)));
+const ub=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+let W=null,TW=null,cur="eth",pending=null,last="eth";
+const msg=(t,k="")=>{$("st").textContent=t;$("st").className=k};
+
+async function dk(pw,salt){
+ const m=await crypto.subtle.importKey("raw",enc.encode(pw),"PBKDF2",false,["deriveKey"]);
+ return crypto.subtle.deriveKey({name:"PBKDF2",salt,iterations:600000,hash:"SHA-256"},m,{name:"AES-GCM",length:256},false,["encrypt","decrypt"]);
+}
+async function seal(t,pw){
+ const salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12));
+ const ct=await crypto.subtle.encrypt({name:"AES-GCM",iv},await dk(pw,salt),enc.encode(t));
+ return JSON.stringify({s:b64(salt),i:b64(iv),c:b64(ct)});
+}
+async function unseal(blob,pw){
+ const o=JSON.parse(blob);
+ return dec.decode(await crypto.subtle.decrypt({name:"AES-GCM",iv:ub(o.i)},await dk(pw,ub(o.s)),ub(o.c)));
+}
+function view(){
+ const has=!!localStorage.getItem("cw");
+ $("lock").hidden=!!W;$("app").hidden=!W;
+ $("unlockBox").hidden=!has;$("setupBox").hidden=has;
+}
+async function setup(){
+ let s=$("seed").value.trim().replace(/\s+/g," ").toLowerCase(),pw=$("pw1").value;
+ if(pw.length<8||pw!==$("pw2").value)return msg("Password must be 8+ characters and match.","err");
+ try{
+  if(!s){
+   s=ethers.Wallet.createRandom().mnemonic.phrase;
+   pending=[s,pw];$("phrase").textContent=s;
+   $("phraseBox").hidden=false;$("setupForm").hidden=true;msg("");return;
+  }
+  if(s.includes(" ")){if(!ethers.Mnemonic.isValidMnemonic(s))throw Error("That seed phrase is not valid.")}
+  else{s=s.replace(/^0x/,"");new ethers.Wallet("0x"+s)}
+  await save(s,pw);
+ }catch(e){msg(e.shortMessage||e.message||"Invalid input.","err")}
+}
+async function save(s,pw){
+ localStorage.setItem("cw",await seal(s,pw));
+ go(s);
+}
+function go(s){
+ let ek,tk;
+ if(s.includes(" ")){
+  ek=ethers.HDNodeWallet.fromPhrase(s,"","m/44'/60'/0'/0/0").privateKey;
+  tk=ethers.HDNodeWallet.fromPhrase(s,"","m/44'/195'/0'/0/0").privateKey.slice(2);
+ }else{ek="0x"+s;tk=s}
+ W=new ethers.Wallet(ek);
+ TW=new TronWeb({fullHost:"https://api.trongrid.io",privateKey:tk});
+ pending=null;
+ $("net").innerHTML=Object.entries(CH).map(([k,v])=>`<option value="${k}">${v.n}</option>`).join("");
+ cur=last="eth";$("pw").value=$("pw1").value=$("pw2").value=$("seed").value="";
+ msg("");view();render();
+}
+async function unlock(){
+ let s;
+ try{s=await unseal(localStorage.getItem("cw"),$("pw").value)}catch{return msg("Wrong password.","err")}
+ go(s);
+}
+const addr=()=>cur==="tron"?TW.defaultAddress.base58:W.address;
+async function render(){
+ const c=CH[cur],a=addr();
+ $("addr").textContent=a;$("bal").textContent="…";
+ try{
+  const b=cur==="tron"?(await TW.trx.getBalance(a))/1e6:ethers.formatEther(await new ethers.JsonRpcProvider(c.rpc).getBalance(a));
+  $("bal").textContent=(+b).toFixed(6)+" "+c.s;msg("");
+ }catch{$("bal").textContent="—";msg("Could not load balance. Check your internet.","err")}
+}
+function chain(){
+ const v=$("net").value;
+ if(v==="custom"){
+  const rpc=prompt("Enter the chain's RPC URL (https://...)"),sym=rpc&&prompt("Coin symbol (e.g. ETH)");
+  if(!rpc||!sym){$("net").value=last;return}
+  CH.custom={n:"Custom EVM chain",s:sym.toUpperCase(),rpc:rpc.trim()};
+ }
+ cur=last=v;render();
+}
+async function send(){
+ const to=$("to").value.trim(),amt=$("amt").value.trim(),c=CH[cur];
+ try{
+  if(!(+amt>0))throw Error("Enter an amount.");
+  if(cur==="tron"?!TronWeb.isAddress(to):!ethers.isAddress(to))throw Error("That address is not valid for "+c.n+".");
+  if(!confirm(`Send ${amt} ${c.s} to ${to} on ${c.n}? This cannot be undone.`))return;
+  msg("Sending…");let id;
+  if(cur==="tron"){
+   const r=await TW.trx.sendTransaction(to,Math.round(amt*1e6));
+   if(!r.result)throw Error("The network rejected the transaction.");id=r.txid;
+  }else{
+   const w=W.connect(new ethers.JsonRpcProvider(c.rpc));
+   id=(await w.sendTransaction({to,value:ethers.parseEther(amt)})).hash;
+  }
+  msg("Sent. Transaction: "+id,"ok");$("to").value=$("amt").value="";render();
+ }catch(e){msg(e.shortMessage||e.message||"Send failed.","err")}
+}
+function ramp(mode){
+ if(!ONRAMP_KEY)return msg("Bank buy/sell is not switched on yet. Add your provider API key in the ONRAMP_KEY line of this file.","err");
+ const c=CH[cur];
+ open(`https://global.transak.com/?apiKey=${ONRAMP_KEY}&productsAvailed=${mode}&cryptoCurrencyCode=${c.s}&walletAddress=${addr()}`,"_blank","noopener");
+}
+function lock(){W=TW=null;msg("");view()}
+$("setupBtn").onclick=setup;
+$("savedBtn").onclick=()=>save(pending[0],pending[1]);
+$("unlockBtn").onclick=unlock;
+$("pw").onkeydown=e=>{if(e.key==="Enter")unlock()};
+$("eraseBtn").onclick=()=>{if(confirm("Erase the wallet from this device? You can only restore it with your seed phrase or private key.")){localStorage.removeItem("cw");location.reload()}};
+$("net").onchange=chain;
+$("refBtn").onclick=render;
+$("copyBtn").onclick=()=>navigator.clipboard.writeText(addr()).then(()=>msg("Address copied.","ok"));
+$("sendBtn").onclick=send;
+$("buyBtn").onclick=()=>ramp("BUY");
+$("sellBtn").onclick=()=>ramp("SELL");
+$("lockBtn").onclick=lock;
+view();
+</script>
+</body>
+</html>
